@@ -1,0 +1,4 @@
+section,name,params,tokens_in_corpus,chars_per_token,best_val_loss,best_iter,val_bits_per_char,train_time_min,vocab_size,context_len,n_layers,n_heads,max_iters
+mini-GPT,minigpt_v1,2856000,39422939,3.19,4.9318,7999,2.2285,4.5,8000,64,4,4,8000
+mini-GPT,minigpt_v2,1828000,45130925,2.79,4.4372,7999,2.2953,4.0,4000,64,4,4,8000
+mini-GPT,minigpt_v3,3251776,39422939,3.19,4.8345,7500,2.1845,9.8,8000,64,6,8,8000
