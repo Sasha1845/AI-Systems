@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<!--
+  Картки з нотаток — застосунок на локальній моделі (Ollama, OpenAI-сумісний API).
+
+  Швидкий запуск (докладно — у README.md):
+    1. Встановіть Ollama і завантажте модель:   ollama pull qwen3:4b-instruct
+    2. У цій теці запустіть:                    python -m http.server 8080 --bind 127.0.0.1
+    3. Відкрийте в браузері:                    http://127.0.0.1:8080/
+-->
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Картки з нотаток</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f5f1;
+    --surface: #ffffff;
+    --text: #1d2125;
+    --muted: #5d6670;
+    --line: #d9d6cc;
+    --accent: #1f6f6b;
+    --accent-text: #ffffff;
+    --warn-bg: #fff4d6;
+    --warn-line: #e3c26a;
+    --err-bg: #fde8e6;
+    --err-line: #e08a82;
+    --radius: 8px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16191c;
+      --surface: #1f2428;
+      --text: #e8eaec;
+      --muted: #9aa4ad;
+      --line: #36404a;
+      --accent: #4fb3ad;
+      --accent-text: #0e1a19;
+      --warn-bg: #3a3118;
+      --warn-line: #7a6624;
+      --err-bg: #3d2020;
+      --err-line: #8a4640;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .lead { margin: 0 0 24px; color: var(--muted); }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  textarea, input, select {
+    width: 100%;
+    padding: 10px 12px;
+    font: inherit;
+    color: inherit;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  textarea { min-height: 200px; resize: vertical; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .counter { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; font-size: .875rem; color: var(--muted); }
+  .counter.over { color: #c0392b; font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 16px 0; }
+  .row .field { width: 140px; }
+  button {
+    font: inherit;
+    padding: 10px 18px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .status { display: flex; align-items: center; gap: 10px; min-height: 28px; color: var(--muted); }
+  .spinner {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid var(--line); border-top-color: var(--accent);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+  .notice { margin: 12px 0; padding: 12px 14px; border-radius: var(--radius); border: 1px solid; }
+  .notice.error { background: var(--err-bg); border-color: var(--err-line); }
+  .notice.warn { background: var(--warn-bg); border-color: var(--warn-line); }
+  details { margin: 16px 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  summary { padding: 10px 14px; cursor: pointer; font-weight: 600; }
+  details > div { padding: 0 14px 14px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .hint { color: var(--muted); font-size: .875rem; margin: 4px 0 0; }
+  pre#raw {
+    margin: 0; padding: 12px; max-height: 220px; overflow: auto;
+    white-space: pre-wrap; word-break: break-word;
+    font: 13px/1.45 ui-monospace, Consolas, monospace;
+    background: var(--bg); border-radius: var(--radius);
+  }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 24px 0 12px; }
+  .toolbar h2 { margin: 0 auto 0 0; font-size: 1.2rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; padding: 0; margin: 0; list-style: none; }
+  .card {
+    display: block; width: 100%; min-height: 128px; padding: 14px 16px;
+    text-align: left; background: var(--surface); border: 1px solid var(--line);
+  }
+  .card .tag { display: block; margin-bottom: 6px; font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .card .text { display: block; font-size: 1.02rem; }
+  .card[data-side="a"] { border-color: var(--accent); }
+  .card[data-side="a"] .tag { color: var(--accent); }
+  .stats { margin-top: 12px; font-size: .875rem; color: var(--muted); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Картки з нотаток</h1>
+  <p class="lead">Вставте конспект — локальна модель на вашому компʼютері зробить із нього картки «питання — відповідь». Нотатки нікуди не надсилаються.</p>
+
+  <label for="notes">Нотатки</label>
+  <textarea id="notes" placeholder="Наприклад: Фотосинтез — процес, під час якого рослини перетворюють світлову енергію на хімічну…" spellcheck="false"></textarea>
+  <div class="counter" id="counterBox"><span>Максимум <span id="limitText"></span> символів</span><span id="counter">0</span></div>
+
+  <div class="row">
+    <div class="field">
+      <label for="maxCards">Карток, до</label>
+      <input id="maxCards" type="number" min="3" max="8" value="5">
+    </div>
+    <button id="runBtn" class="primary" type="button">Створити картки</button>
+    <button id="stopBtn" type="button" hidden>Зупинити</button>
+    <button id="sampleBtn" type="button">Вставити приклад</button>
+  </div>
+
+  <div class="status" id="status" role="status" aria-live="polite"></div>
+  <div id="errorBox" class="notice error" role="alert" hidden></div>
+
+  <details id="settings">
+    <summary>Налаштування</summary>
+    <div>
+      <div class="grid2">
+        <div><label for="baseUrl">Адреса API</label><input id="baseUrl" type="text" spellcheck="false"></div>
+        <div><label for="model">Модель</label><input id="model" type="text" spellcheck="false"></div>
+        <div><label for="temperature">Temperature</label><input id="temperature" type="number" min="0" max="1.5" step="0.1"></div>
+        <div><label for="maxTokens">Ліміт токенів відповіді</label><input id="maxTokens" type="number" min="100" max="2000" step="50"></div>
+        <div><label for="timeoutS">Таймаут, с</label><input id="timeoutS" type="number" min="10" max="300" step="5"></div>
+      </div>
+      <p style="margin:14px 0 0"><label style="display:inline;font-weight:400"><input id="jsonMode" type="checkbox" style="width:auto"> Режим JSON (response_format: json_object)</label></p>
+      <p class="hint">Вимкніть режим JSON, якщо ваш рантайм його не підтримує. Значення за замовчуванням обґрунтовано в README.md.</p>
+      <p><button id="resetBtn" type="button">Скинути налаштування</button></p>
+    </div>
+  </details>
+
+  <details id="rawBox" hidden>
+    <summary>Відповідь моделі (як є)</summary>
+    <div><pre id="raw"></pre></div>
+  </details>
+
+  <section id="result" hidden>
+    <div class="toolbar">
+      <h2 id="resultTitle">Картки</h2>
+      <button id="flipAllBtn" type="button">Показати всі відповіді</button>
+      <button id="jsonBtn" type="button">Завантажити JSON</button>
+      <button id="tsvBtn" type="button">Завантажити для Anki (.tsv)</button>
+    </div>
+    <div id="modelWarning" class="notice warn" hidden></div>
+    <ul class="cards" id="cards"></ul>
+    <div class="stats" id="stats"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// ---------- Налаштування ----------
+const DEFAULTS = {
+  baseUrl: "http://127.0.0.1:11434/v1", // 127.0.0.1, а не localhost: у Windows localhost додає ~2 с до кожного запиту
+  model: "qwen3:4b-instruct",
+  temperature: 0.2,
+  maxTokens: 700,
+  timeoutS: 60,
+  jsonMode: true,
+};
+const MAX_NOTES_CHARS = 3500; // ≈1500–1750 токенів: разом із промптом і відповіддю вміщується в контекст 4096
+const STORAGE_KEY = "flashcards-settings-v1";
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  notes: $("notes"), counter: $("counter"), counterBox: $("counterBox"), limitText: $("limitText"),
+  maxCards: $("maxCards"), runBtn: $("runBtn"), stopBtn: $("stopBtn"), sampleBtn: $("sampleBtn"),
+  status: $("status"), errorBox: $("errorBox"), rawBox: $("rawBox"), raw: $("raw"),
+  result: $("result"), resultTitle: $("resultTitle"), cards: $("cards"), modelWarning: $("modelWarning"),
+  stats: $("stats"), flipAllBtn: $("flipAllBtn"), jsonBtn: $("jsonBtn"), tsvBtn: $("tsvBtn"),
+  baseUrl: $("baseUrl"), model: $("model"), temperature: $("temperature"), maxTokens: $("maxTokens"),
+  timeoutS: $("timeoutS"), jsonMode: $("jsonMode"), resetBtn: $("resetBtn"),
+};
+
+function loadSettings() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { /* сховище недоступне */ }
+  return { ...DEFAULTS, ...saved };
+}
+function saveSettings() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(readSettings())); } catch { /* ігноруємо */ }
+}
+function writeSettings(s) {
+  els.baseUrl.value = s.baseUrl; els.model.value = s.model; els.temperature.value = s.temperature;
+  els.maxTokens.value = s.maxTokens; els.timeoutS.value = s.timeoutS; els.jsonMode.checked = !!s.jsonMode;
+}
+function readSettings() {
+  const num = (el, fallback, min, max) => {
+    const v = parseFloat(el.value);
+    return Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
+  };
+  return {
+    baseUrl: els.baseUrl.value.trim() || DEFAULTS.baseUrl,
+    model: els.model.value.trim() || DEFAULTS.model,
+    temperature: num(els.temperature, DEFAULTS.temperature, 0, 1.5),
+    maxTokens: Math.round(num(els.maxTokens, DEFAULTS.maxTokens, 100, 2000)),
+    timeoutS: num(els.timeoutS, DEFAULTS.timeoutS, 10, 300),
+    jsonMode: els.jsonMode.checked,
+  };
+}
+
+// ---------- Промпт: системні правила + три приклади (few-shot) ----------
+const SYSTEM_PROMPT = [
+  "Ти помічник, який перетворює навчальні нотатки на картки для повторення.",
+  "Відповідай ЛИШЕ JSON-об'єктом такого вигляду: {\"cards\": [{\"q\": \"питання\", \"a\": \"відповідь\"}], \"warning\": null}.",
+  "Правила:",
+  "1. Картки пиши українською. Питання короткі, відповіді точні й лише з нотаток.",
+  "2. Одна картка — один факт. Не повторюй те саме питання іншими словами. Якщо фактів менше, ніж просять, роби менше карток.",
+  "3. Відповідь має бути змістовним фактом або повним реченням, зрозумілим без питання. Не став питань із відповіддю лише «так» чи «ні»: замість «Чи гарантує UDP доставку?» питай «Яку гарантію доставки дає UDP?».",
+  "4. Відповідь має відповідати саме на це питання. Перед тим як записати відповідь, перевір, що вона стосується питання, а не загальної теми.",
+  "5. Якщо в нотатках немає навчального змісту (привітання, побутові фрази), поверни порожній масив cards, а в warning поясни, чому.",
+  "6. Якщо в нотатках є явно хибний факт, не повторюй його: у картці напиши правильний факт, а в warning коротко вкажи, що саме в нотатках неправильне.",
+  "7. Поле warning — рядок або null. Нічого, крім JSON, не пиши.",
+].join("\n");
+
+const userMessage = (n, notes) => `Зроби до ${n} карток із цих нотаток:\n\n${notes}`;
+
+const FEW_SHOT = [
+  { role: "user", content: userMessage(5, "Мітохондрії — органели, що виробляють АТФ. Їх називають «енергетичними станціями» клітини.") },
+  { role: "assistant", content: JSON.stringify({
+      cards: [
+        { q: "Що виробляють мітохондрії?", a: "АТФ." },
+        { q: "Як ще називають мітохондрії?", a: "«Енергетичними станціями» клітини." },
+      ], warning: null }) },
+  { role: "user", content: userMessage(5, "привіт, як справи? сьогодні гарна погода.") },
+  { role: "assistant", content: JSON.stringify({
+      cards: [], warning: "У нотатках немає навчального змісту, тому карток не створено." }) },
+  { role: "user", content: userMessage(5, "Вода кипить при 50 °C за нормального атмосферного тиску.") },
+  { role: "assistant", content: JSON.stringify({
+      cards: [{ q: "За якої температури кипить вода за нормального атмосферного тиску?", a: "За 100 °C." }],
+      warning: "У нотатках помилка: вода кипить при 100 °C, а не при 50 °C." }) },
+];
+
+// ---------- Помилки ----------
+class HttpError extends Error { constructor(status, detail) { super(detail || `HTTP ${status}`); this.status = status; this.detail = detail; } }
+class ParseError extends Error {}
+
+function explainError(err, cfg, ctx) {
+  if (err.name === "AbortError") {
+    return ctx.timedOut
+      ? `Модель не відповіла за ${cfg.timeoutS} с. Можливо, вона ще завантажується в памʼять або сервер перевантажений. Спробуйте ще раз або збільште таймаут у налаштуваннях.`
+      : null; // зупинено користувачем — не помилка
+  }
+  if (err instanceof HttpError) {
+    if (err.status === 404) return `Модель «${cfg.model}» не знайдено на сервері. Завантажте її командою: ollama pull ${cfg.model}`;
+    if (err.status === 400 && cfg.jsonMode) return `Сервер відхилив запит (HTTP 400${err.detail ? ": " + err.detail : ""}). Спробуйте вимкнути «Режим JSON» у налаштуваннях.`;
+    return `Сервер повернув помилку (HTTP ${err.status})${err.detail ? ": " + err.detail : ""}.`;
+  }
+  if (err instanceof ParseError) {
+    return err.message;
+  }
+  if (err instanceof TypeError) {
+    return `Не вдалося підключитися до ${cfg.baseUrl}. Перевірте, що Ollama запущена (значок лами біля годинника або команда «ollama serve») і що адреса в налаштуваннях правильна. Якщо сторінку відкрито як файл, запустіть її через «python -m http.server» — див. README.md.`;
+  }
+  return `Невідома помилка: ${err.message || err}`;
+}
+
+// ---------- Запит до моделі (стрімінг, OpenAI-сумісний API) ----------
+async function streamCompletion(cfg, messages, signal, onDelta) {
+  const body = {
+    model: cfg.model,
+    messages,
+    stream: true,
+    stream_options: { include_usage: true },
+    max_tokens: cfg.maxTokens,   // обов'язковий ліміт: мала модель може зациклитися
+    temperature: cfg.temperature,
+  };
+  if (cfg.jsonMode) body.response_format = { type: "json_object" };
+
+  const response = await fetch(`${cfg.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!response.ok) {
+    let detail = "";
+    try { const j = await response.json(); detail = j.error?.message || j.error || ""; } catch { /* тіла немає */ }
+    throw new HttpError(response.status, typeof detail === "string" ? detail : JSON.stringify(detail));
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "", text = "", finishReason = null, usage = null, firstAt = null;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let nl;
+    while ((nl = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, nl).trim();
+      buffer = buffer.slice(nl + 1);
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      let chunk;
+      try { chunk = JSON.parse(payload); } catch { continue; }
+      if (chunk.error) throw new HttpError(500, chunk.error.message || String(chunk.error));
+      if (chunk.usage) usage = chunk.usage;
+      const choice = chunk.choices && chunk.choices[0];
+      if (!choice) continue;
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+      const piece = choice.delta && choice.delta.content;
+      if (piece) {
+        if (firstAt === null) firstAt = performance.now();
+        text += piece;
+        onDelta(piece, text);
+      }
+    }
+  }
+  return { text, finishReason, usage, firstAt };
+}
+
+// ---------- Розбір відповіді моделі ----------
+function parseModelAnswer(rawText, truncated) {
+  const fail = (why) => new ParseError(
+    truncated
+      ? "Відповідь обірвано через ліміт токенів, тому картки неповні. Зменште нотатки або кількість карток, або збільште ліміт у налаштуваннях. Сирий текст — нижче."
+      : `Модель повернула відповідь у неправильному форматі (${why}). Спробуйте ще раз; сирий текст — нижче.`);
+
+  let s = rawText.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  if (!s) throw fail("порожня відповідь");
+  let data;
+  try { data = JSON.parse(s); }
+  catch {
+    const start = s.search(/[\[{]/);
+    const end = Math.max(s.lastIndexOf("}"), s.lastIndexOf("]"));
+    if (start < 0 || end <= start) throw fail("не знайдено JSON");
+    try { data = JSON.parse(s.slice(start, end + 1)); } catch { throw fail("JSON пошкоджено"); }
+  }
+  if (Array.isArray(data)) data = { cards: data, warning: null };
+  if (!data || typeof data !== "object" || !Array.isArray(data.cards)) throw fail("немає масиву cards");
+
+  const seen = new Set();
+  const cards = [];
+  for (const c of data.cards) {
+    if (!c || typeof c.q !== "string" || typeof c.a !== "string") continue;
+    const q = c.q.trim(), a = c.a.trim();
+    if (!q || !a || seen.has(q.toLowerCase())) continue;
+    seen.add(q.toLowerCase());
+    cards.push({ q, a });
+  }
+  if (data.cards.length > 0 && cards.length === 0) throw fail("картки без полів q і a");
+  const warning = typeof data.warning === "string" && data.warning.trim() ? data.warning.trim() : null;
+  return { cards, warning };
+}
+
+// ---------- Інтерфейс ----------
+let controller = null;
+let currentCards = [];
+
+function setStatus(text, busy = false) {
+  els.status.replaceChildren();
+  if (busy) { const sp = document.createElement("span"); sp.className = "spinner"; sp.setAttribute("aria-hidden", "true"); els.status.append(sp); }
+  els.status.append(document.createTextNode(text));
+}
+function showError(msg) { els.errorBox.textContent = msg; els.errorBox.hidden = !msg; }
+function setRunning(running) {
+  els.runBtn.disabled = running; els.sampleBtn.disabled = running;
+  els.stopBtn.hidden = !running;
+}
+function updateCounter() {
+  const n = els.notes.value.length;
+  els.counter.textContent = `${n} / ${MAX_NOTES_CHARS}`;
+  els.counterBox.classList.toggle("over", n > MAX_NOTES_CHARS);
+}
+
+function renderCards(cards) {
+  els.cards.replaceChildren();
+  cards.forEach((c, i) => {
+    const li = document.createElement("li");
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "card"; btn.dataset.side = "q";
+    const tag = document.createElement("span"); tag.className = "tag";
+    const text = document.createElement("span"); text.className = "text";
+    btn.append(tag, text);
+    const paint = () => {
+      const side = btn.dataset.side;
+      tag.textContent = side === "q" ? `Питання ${i + 1}` : `Відповідь ${i + 1}`;
+      text.textContent = side === "q" ? c.q : c.a;
+      btn.setAttribute("aria-label", `${tag.textContent}: ${text.textContent}. Натисніть, щоб перевернути картку.`);
+    };
+    btn.addEventListener("click", () => { btn.dataset.side = btn.dataset.side === "q" ? "a" : "q"; paint(); syncFlipAll(); });
+    btn._paint = paint; paint();
+    li.append(btn); els.cards.append(li);
+  });
+  syncFlipAll();
+}
+function syncFlipAll() {
+  const all = [...els.cards.querySelectorAll(".card")];
+  els.flipAllBtn.textContent = all.length && all.every((b) => b.dataset.side === "a") ? "Показати всі питання" : "Показати всі відповіді";
+  els.flipAllBtn.hidden = all.length === 0;
+}
+els.flipAllBtn.addEventListener("click", () => {
+  const all = [...els.cards.querySelectorAll(".card")];
+  const toAnswers = !all.every((b) => b.dataset.side === "a");
+  all.forEach((b) => { b.dataset.side = toAnswers ? "a" : "q"; b._paint(); });
+  syncFlipAll();
+});
+
+function download(name, mime, content) {
+  const url = URL.createObjectURL(new Blob([content], { type: mime }));
+  const a = document.createElement("a"); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+els.jsonBtn.addEventListener("click", () => download("cards.json", "application/json", JSON.stringify(currentCards, null, 2)));
+els.tsvBtn.addEventListener("click", () => {
+  const clean = (s) => s.replace(/[\t\r\n]+/g, " ");
+  download("cards.tsv", "text/tab-separated-values", currentCards.map((c) => `${clean(c.q)}\t${clean(c.a)}`).join("\n") + "\n");
+});
+
+async function run() {
+  // Різні апострофи (ʼ ’ ‘ ` ´) приводимо до звичайного ': рідкісний символ погано токенізується,
+  // і мала модель починала губити літери (наприклад, писала «з'єнання» замість «з'єднання»).
+  const notes = els.notes.value.replace(/[\u02BC\u2019\u2018\u0060\u00B4]/g, "'").trim();
+  showError("");
+  if (!notes) { showError("Вставте нотатки в поле вище."); return; }
+  if (notes.length > MAX_NOTES_CHARS) {
+    showError(`Нотаток забагато: ${notes.length} символів, максимум ${MAX_NOTES_CHARS}. Розбийте їх на частини — модель має обмежений контекст.`);
+    return;
+  }
+  const cfg = readSettings();
+  saveSettings();
+  const maxCards = Math.min(8, Math.max(3, parseInt(els.maxCards.value, 10) || 5));
+
+  const messages = [{ role: "system", content: SYSTEM_PROMPT }, ...FEW_SHOT, { role: "user", content: userMessage(maxCards, notes) }];
+
+  controller = new AbortController();
+  const ctx = { timedOut: false };
+  const timer = setTimeout(() => { ctx.timedOut = true; controller.abort(); }, cfg.timeoutS * 1000);
+  const started = performance.now();
+
+  els.result.hidden = true; els.raw.textContent = ""; els.rawBox.hidden = false; els.rawBox.open = true;
+  setRunning(true);
+  setStatus("Чекаю на першу відповідь моделі…", true);
+
+  let answer = null;
+  try {
+    answer = await streamCompletion(cfg, messages, controller.signal, (_piece, full) => {
+      els.raw.textContent = full;
+      els.raw.scrollTop = els.raw.scrollHeight;
+      setStatus(`Модель пише відповідь… ${full.length} символів`, true);
+    });
+    const truncated = answer.finishReason === "length";
+    const parsed = parseModelAnswer(answer.text, truncated);
+    currentCards = parsed.cards;
+
+    const seconds = (performance.now() - started) / 1000;
+    const tokens = answer.usage && answer.usage.completion_tokens;
+    const genSeconds = answer.firstAt ? (performance.now() - answer.firstAt) / 1000 : null;
+    const speed = tokens && genSeconds && genSeconds > 0 ? ` · ${((tokens - 1) / genSeconds).toFixed(0)} ток/с` : "";
+    const ttft = answer.firstAt ? (answer.firstAt - started) / 1000 : null;
+    els.stats.textContent = `Готово за ${seconds.toFixed(1)} с${ttft !== null ? ` (перший токен через ${ttft.toFixed(1)} с)` : ""}${tokens ? ` · ${tokens} токенів` : ""}${speed}`;
+
+    els.resultTitle.textContent = parsed.cards.length ? `Картки (${parsed.cards.length})` : "Карток не створено";
+    els.modelWarning.hidden = !(parsed.warning || truncated);
+    els.modelWarning.textContent = [parsed.warning, truncated ? "Відповідь обірвано через ліміт токенів — результат може бути неповним." : ""].filter(Boolean).join(" ");
+    els.jsonBtn.disabled = els.tsvBtn.disabled = parsed.cards.length === 0;
+    renderCards(parsed.cards);
+    els.result.hidden = false;
+    els.rawBox.open = false;
+    setStatus(parsed.cards.length ? "Готово. Натискайте на картку, щоб перевернути її." : "Готово.");
+  } catch (err) {
+    const message = explainError(err, cfg, ctx);
+    if (message === null) { setStatus("Зупинено."); }
+    else { showError(message); setStatus(""); }
+    if (!els.raw.textContent) els.rawBox.hidden = true;
+  } finally {
+    clearTimeout(timer);
+    controller = null;
+    setRunning(false);
+  }
+}
+
+els.runBtn.addEventListener("click", run);
+els.stopBtn.addEventListener("click", () => controller && controller.abort());
+els.notes.addEventListener("input", updateCounter);
+els.notes.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !els.runBtn.disabled) run(); });
+els.sampleBtn.addEventListener("click", () => {
+  els.notes.value = "Протокол TCP встановлює зʼєднання у три кроки (three-way handshake): клієнт надсилає SYN, сервер відповідає SYN-ACK, клієнт підтверджує пакетом ACK. Після цього зʼєднання вважається встановленим. Протокол UDP зʼєднання не встановлює і не гарантує доставку пакетів, зате працює швидше.";
+  updateCounter();
+});
+els.resetBtn.addEventListener("click", () => { writeSettings(DEFAULTS); saveSettings(); });
+for (const id of ["baseUrl", "model", "temperature", "maxTokens", "timeoutS", "jsonMode"]) els[id].addEventListener("change", saveSettings);
+
+els.limitText.textContent = String(MAX_NOTES_CHARS);
+writeSettings(loadSettings());
+updateCounter();
+</script>
+</body>
+</html>
