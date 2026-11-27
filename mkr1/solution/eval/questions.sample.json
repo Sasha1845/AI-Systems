@@ -1,0 +1,10 @@
+[
+  {"q": "Що таке первинний ключ і чи може він бути NULL?", "source": "sample_db_basics.md", "keywords": ["ідентиф"]},
+  {"q": "Що вимагає друга нормальна форма?", "source": "sample_db_basics.md", "keywords": ["неключов"]},
+  {"q": "Чим LEFT JOIN відрізняється від INNER JOIN?", "source": "sample_db_basics.md", "keywords": ["NULL"]},
+  {"q": "Який недолік мають індекси?", "source": "sample_db_basics.md", "keywords": ["уповільн"]},
+  {"q": "Що означає атомарність у ACID?", "source": "sample_transactions.md", "keywords": ["жодна"]},
+  {"q": "Який рівень ізоляції забороняє фантомне читання?", "source": "sample_transactions.md", "keywords": ["SERIALIZABLE"]},
+  {"q": "Як зменшити ймовірність deadlock?", "source": "sample_transactions.md", "keywords": ["порядк"]},
+  {"q": "Для чого потрібен SAVEPOINT?", "source": "sample_transactions.md", "keywords": ["проміжн"]}
+]

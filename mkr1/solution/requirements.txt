@@ -1,0 +1,5 @@
+pypdf
+python-docx
+streamlit>=1.40
+python-dotenv
+# anthropic   # розкоментуйте, лише якщо LLM_PROVIDER=claude
